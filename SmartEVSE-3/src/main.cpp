@@ -69,7 +69,9 @@ bool MqttButtonState = false;                                               // T
 uint16_t MaxCurrent = MAX_CURRENT;                                          // Max Charge current (A)
 uint16_t MinCurrent = MIN_CURRENT;                                          // Minimal current the EV is happy with (A)
 uint8_t Mode = MODE;                                                        // EVSE mode (0:Normal / 1:Smart / 2:Solar / 3:NOM)
-uint8_t NomEnabled = 1;                                                     // NOM switch for MODE_NOM (0:Off = pure Solar behaviour / 1:On)
+time_t NomImportSince = 0;                                                  // NOM: moment the import above the margin started (0 = no import)
+float NomIsumAvg = 0;                                                       // NOM: Isum averaged over NOM_AVG_TIME seconds (0.1A units)
+uint32_t NomAvgLastMillis = 0;                                              // NOM: time of last average update (0 = average not started)
 uint32_t CurrentPWM = 0;                                                    // Current PWM duty cycle value (0 - 1024)
 bool CPDutyOverride = false;
 uint8_t Lock = LOCK;                                                        // Cable lock device (0:Disable / 1:Solenoid / 2:Motor)
@@ -807,7 +809,8 @@ char IsCurrentAvailable(void) {
     if (IS_SOLAR_LIKE(Mode)) {                                                  // no active EVSE yet?
         // NOM switched on: as long as the meter shows (about) 0, we may start as if there is enough solar
         signed int StartThreshold = NOM_ACTIVE ? NOM_MARGIN + 1 : ((signed int)StartCurrent *-10);
-        if (ActiveEVSE == 0 && Isum >= StartThreshold) {
+        signed int IsumCheck = NOM_ACTIVE ? (signed int) NomIsumAvg : Isum;  // NOM: use the averaged meter value
+        if (ActiveEVSE == 0 && IsumCheck >= StartThreshold) {
             _LOG_D("No current available StartCurrent line %d. ActiveEVSE=%u, TotalCurrent=%d.%dA, StartCurrent=%uA, Isum=%d.%dA, ImportCurrent=%uA.\n", __LINE__, ActiveEVSE, TotalCurrent/10, abs(TotalCurrent%10), StartCurrent, Isum/10, abs(Isum%10), ImportCurrent);
             return 0;
         }
@@ -815,7 +818,7 @@ char IsCurrentAvailable(void) {
             _LOG_D("No current available StartCurrent line %d. ActiveEVSE=%u, TotalCurrent=%d.%dA, StartCurrent=%uA, Isum=%d.%dA, ImportCurrent=%uA.\n", __LINE__, ActiveEVSE, TotalCurrent/10, abs(TotalCurrent%10), StartCurrent, Isum/10, abs(Isum%10), ImportCurrent);
             return 0;
         }
-        else if (ActiveEVSE > 0 && Isum > ((signed int)ImportCurrent * 10) + (NOM_ACTIVE ? NOM_MARGIN : 0) + TotalCurrent - (ActiveEVSE * MinCurrent * 10)) {
+        else if (ActiveEVSE > 0 && IsumCheck > ((signed int)ImportCurrent * 10) + (NOM_ACTIVE ? NOM_MARGIN : 0) + TotalCurrent - (ActiveEVSE * MinCurrent * 10)) {
             _LOG_D("No current available StartCurrent line %d. ActiveEVSE=%u, TotalCurrent=%d.%dA, StartCurrent=%uA, Isum=%d.%dA, ImportCurrent=%uA.\n", __LINE__, ActiveEVSE, TotalCurrent/10, abs(TotalCurrent%10), StartCurrent, Isum/10, abs(Isum%10), ImportCurrent);
             return 0;
         }
@@ -986,19 +989,33 @@ void CalcBalancedCurrent(char mod) {
 
         if (IS_SOLAR_LIKE(Mode))                                                // Solar version (also used by NOM)
         {
-            IsumImport = Isum - (10 * ImportCurrent);                           // Allow Import of power from the grid when solar charging
+            signed int IsumReg = NOM_ACTIVE ? (signed int) NomIsumAvg : Isum;  // NOM: regulate on the ~30s average of the sum of phases
+            IsumImport = IsumReg - (10 * ImportCurrent);                        // Allow Import of power from the grid when solar charging
             if (NOM_ACTIVE) IsumImport -= NOM_MARGIN;                           // NOM: a meter at (about) 0 counts as available power
             // when there is NO charging, do not change the setpoint (IsetBalanced); except when we are in Master/Slave configuration
             if (ActiveEVSE > 0 && Idifference > 0) {                            // so we had some room for power as far as MaxCircuit and MaxMains are concerned
                 if (phasesLastUpdateFlag) {                                     // only increase or decrease current if measurements are updated.
+                    if (IsumImport < 0) NomImportSince = 0;                     // NOM: no (extra) import, reset import timer
                     if (IsumImport < 0) {
                         // negative, we have surplus (solar) power available
-                        if (NOM_ACTIVE && Isum >= -10)
+                        if (NOM_ACTIVE && IsumReg >= -10)
                             IsetBalanced = IsetBalanced + NOM_RAMP;                 // NOM: meter is at 0 (home battery covers us), increase slowly
                         else if (IsumImport < -10 && Idifference > 10)
                             IsetBalanced = IsetBalanced + 5;                        // more then 1A available, increase Balanced charge current with 0.5A
                         else
                             IsetBalanced = IsetBalanced + 1;                        // less then 1A available, increase with 0.1A
+                    } else if (NOM_ACTIVE) {
+                        // NOM: we import more than the margin. Give the home battery time to react
+                        // before lowering the current, and then lower it gently.
+                        if (IsumImport > 3) {
+                            if (NomImportSince == 0) NomImportSince = time(NULL);
+                            if (time(NULL) - NomImportSince >= NOM_DECREASE_DELAY) {
+                                if (IsumImport > 60)
+                                    IsetBalanced = IsetBalanced - (IsumImport / 4); // large import (>6A over margin): decrease faster
+                                else
+                                    IsetBalanced = IsetBalanced - NOM_STEP_DOWN;    // decrease with 0.5A per update
+                            }
+                        } else NomImportSince = 0;                              // within deadband: do nothing
                     } else {
                         // positive, we use more power then is generated
                         if (IsumImport > 20)
@@ -2896,5 +2913,17 @@ void CalcIsum(void) {
         Isum = Isum + MainsMeter.Irms[x];
     }
     MainsMeter.CalcImeasured();
+
+    // NOM: keep a time based moving average of Isum, so the regulation does not chase every
+    // overshoot of the home battery. MaxMains/MaxCircuit protection does NOT use this average.
+    uint32_t now = millis();
+    if (Mode != MODE_NOM || NomAvgLastMillis == 0) {
+        NomIsumAvg = Isum;                                                      // (re)start the average at the current value
+    } else {
+        float dt = (now - NomAvgLastMillis) / 1000.0f;
+        if (dt > NOM_AVG_TIME) dt = NOM_AVG_TIME;
+        NomIsumAvg += (Isum - NomIsumAvg) * dt / NOM_AVG_TIME;
+    }
+    NomAvgLastMillis = now ? now : 1;
 }
 

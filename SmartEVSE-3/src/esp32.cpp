@@ -495,10 +495,6 @@ void mqtt_receive_callback(const String topic, const String payload) {
         } else if (payload == "Pause") {
             setAccess(PAUSE);
         }
-    } else if (topic == MQTTprefix + "/Set/NOM") {
-        NomEnabled = (payload == "On") ? 1 : 0;
-        shadowPrefs.markUChar("NomEnabled", &NomEnabled);
-        lastMqttUpdate = 10;
     } else if (topic == MQTTprefix + "/Set/CustomButton") {
         if (payload == "On") {
             CustomButton = true;
@@ -875,10 +871,6 @@ void SetupMQTTClient() {
         ", \"state_topic\":\"%s/CustomButton\", \"command_topic\":\"%s/Set/CustomButton\", \"options\":[\"On\", \"Off\"]", p, p);
     MQTTclient.announce("Custom Button", "select", opt);
 
-    snprintf(opt, sizeof(opt),
-        ", \"state_topic\":\"%s/NOM\", \"command_topic\":\"%s/Set/NOM\", \"options\":[\"On\", \"Off\"]", p, p);
-    MQTTclient.announce("NOM", "select", opt);
-
     MQTTclient.announce("SolarStopTimer",    "sensor", ", \"device_class\":\"duration\", \"unit_of_measurement\":\"s\"");
     MQTTclient.announce("Max Sum Mains Time","sensor", ", \"device_class\":\"duration\", \"unit_of_measurement\":\"min\"");
 
@@ -982,7 +974,6 @@ void mqttPublishData() {
         mqPubI("/MaxSumMains", MaxSumMains, true, 0);
         mqPubI("/MaxSumMainsTime", MaxSumMainsTime, true, 0);
         mqPubS("/CustomButton", CustomButton ? "On" : "Off", false, 0);
-        mqPubS("/NOM", NomEnabled ? "On" : "Off", true, 0);
         mqPubI("/ChargeCurrent", Balanced[0], true, 0);
         mqPubI("/ChargeCurrentOverride", OverrideCurrent, true, 0);
         mqPubI("/NrOfPhases", Nr_Of_Phases_Charging, true, 0);
@@ -1227,7 +1218,6 @@ void read_settings() {
         Config = preferences.getUChar("Config", CONFIG); 
         Lock = preferences.getUChar("Lock", LOCK); 
         Mode = preferences.getUChar("Mode", MODE); 
-        NomEnabled = preferences.getUChar("NomEnabled", 1);
         AccessStatus = (AccessStatus_t) preferences.getUChar("Access", ON);
         if (preferences.isKey("CardOffset")) {
             CardOffset = preferences.getUChar("CardOffset", CARD_OFFSET);
@@ -1325,7 +1315,6 @@ void write_settings(void) {
     PREFS_PUT_UCHAR_IF_CHANGED("Config", Config);
     PREFS_PUT_UCHAR_IF_CHANGED("Lock", Lock);
     PREFS_PUT_UCHAR_IF_CHANGED("Mode", Mode);
-    PREFS_PUT_UCHAR_IF_CHANGED("NomEnabled", NomEnabled);
     PREFS_PUT_UCHAR_IF_CHANGED("Access", AccessStatus);
     PREFS_PUT_USHORT_IF_CHANGED("CardOffs16", CardOffset);
     PREFS_PUT_ULONG_IF_CHANGED("DelayedStartTim", DelayedStartTime.epoch2);
@@ -1616,7 +1605,6 @@ bool handle_URI(struct mg_connection *c, struct mg_http_message *hm,  webServerR
         doc["evse"]["connected"] = evConnected;
         doc["evse"]["access"] = AccessStatus;
         doc["evse"]["mode"] = Mode;
-        doc["evse"]["nom"] = NomEnabled;
         doc["evse"]["loadbl"] = LoadBl;
         doc["evse"]["pwm"] = CurrentPWM;
         doc["evse"]["custombutton"] = CustomButton;
@@ -1933,12 +1921,6 @@ bool handle_URI(struct mg_connection *c, struct mg_http_message *hm,  webServerR
                     mode = "Value not allowed!";
             }
             doc["mode"] = mode;
-        }
-
-        if(request->hasParam("nom")) {
-            NomEnabled = request->getParam("nom")->value().toInt() > 0 ? 1 : 0;
-            shadowPrefs.markUChar("NomEnabled", &NomEnabled);
-            doc["nom"] = NomEnabled;
         }
 
         if(request->hasParam("enable_C2")) {

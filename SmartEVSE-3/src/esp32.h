@@ -102,7 +102,6 @@ extern portMUX_TYPE rtc_spinlock;   //TODO: Will be placed in the appropriate po
 extern struct tm timeinfo;
 
 
-extern uint8_t NomEnabled;                                                      // NOM switch (0:Off / 1:On) for MODE_NOM
 extern uint8_t Mode;                                                            // EVSE mode
 extern uint8_t LoadBl;                                                          // Load Balance Setting (Disable, Master or Node)
 extern uint8_t Grid;

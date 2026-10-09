@@ -134,9 +134,12 @@
 #define MODE_SOLAR 2
 #define MODE_NOM 3                                                              // Solar copy with "Nul Op de Meter" (zero on the meter) option
 #define IS_SOLAR_LIKE(m) ((m) == MODE_SOLAR || (m) == MODE_NOM)                 // Solar and NOM share the solar regulation
-#define NOM_ACTIVE (Mode == MODE_NOM && NomEnabled)                             // NOM mode with the NOM switch ON
-#define NOM_MARGIN 10                                                           // NOM: Isum (sum of phases) up to +1.0A still counts as "0 on the meter"
+#define NOM_ACTIVE (Mode == MODE_NOM)                                           // NOM mode: regulate on "zero on the meter"
+#define NOM_MARGIN 20                                                           // NOM: Isum (sum of phases) up to +2.0A still counts as "0 on the meter"
 #define NOM_RAMP 2                                                              // NOM: increase charge current with 0.2A per meter update when meter is at 0
+#define NOM_DECREASE_DELAY 10                                                   // NOM: import must last this many seconds before we lower the current (home battery reaction time)
+#define NOM_STEP_DOWN 5                                                         // NOM: lower charge current with 0.5A per meter update while importing
+#define NOM_AVG_TIME 30                                                         // NOM: Isum is averaged over ~30 seconds, so home battery overshoots cancel out
 
 #define MODBUS_BAUDRATE 9600
 #define MODBUS_TIMEOUT 4

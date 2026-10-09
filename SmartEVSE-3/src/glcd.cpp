@@ -918,7 +918,7 @@ void GLCD(void) {
                     LCDText = 0;
                     if (Mode != MODE_NORMAL) {
                         if (Mode == MODE_SOLAR) sprintf(Str, "SOLAR");
-                            else if (Mode == MODE_NOM) sprintf(Str, NomEnabled ? "NOM  " : "NOM- ");
+                            else if (Mode == MODE_NOM) sprintf(Str, "NOM  ");
                             else sprintf(Str, "SMART");
                             sprintf(Str+5," %uP", Nr_Of_Phases_Charging);
                         GLCD_print_buf2(5, Str);
