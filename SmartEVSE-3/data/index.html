@@ -227,8 +227,6 @@
               $('[id=override_current_box]').show();
               $('[id=override_current_box2]').show();
             }
-            $('.with_nom').toggle(data.mode_id == 5);
-            $('#nom_enabled').prop('checked', data.evse.nom == 1);
 
             if (data.ev_state) {
               let full_soc = data.ev_state.full_soc;
@@ -262,7 +260,6 @@
               $('[id=loadbl]').show();
               $('[id=loadbl_text]').show();
               $('[id=loadbl_node]').text("Slave Node "+(data.evse.loadbl-1));
-              $('.with_nom').hide();                                            // NOM regulation is done by the Master
               //$('[id=loadbl_text_slave]').show();
               //$('[id=loadbl_text_master]').hide();
               $('[id=contactor2]').hide();
@@ -1602,11 +1599,6 @@
                       $.post( "/settings?stop_timer=" + val);
                     }
 
-                    function NomToggle() {
-                      let val = $('#nom_enabled').is(':checked') ? 1 : 0;
-                      $.post( "/settings?nom=" + val);
-                    }
-
                     /**
                      * Activates a mode by sending configuration data to the server.
                      * @param {0|1|2|3|4|5} mode - The operating mode to activate; off | normal | solar | smart | pause | nom
@@ -1810,7 +1802,7 @@
                                               NORMAL: basic charging<br>
                                               SOLAR: Use Solar surplus power<br>
                                               SMART: Take home consumers into account<br>
-                                              NOM: Solar, but with NOM on keep charging as long as the meter (sum of phases) stays at 0</span>
+                                              NOM: Like Solar, but keeps charging as long as the meter (sum of phases) stays at about 0</span>
                                           </div>
                                         </div>
                                         <div class="col">
@@ -1850,12 +1842,6 @@
                                         <div class="mb-0"><div class="d-inline-flex align-items-center"><label style="width:100px;" for="solar_start_current">Start Current   </label><input type="number" onchange="SolStartCurr()" id="solar_start_current" name="solar_start_current" min="0" max="16" style="width:80px;" class="ui-corner-all ui-shadow-inset"/>&nbsp;A</div></div>
                                         <div class="mb-0"><div class="d-inline-flex align-items-center"><label style="width:100px;" for="solar_max_import_current">Max Import </label><input type="number" onchange="SolImportCurr()" id="solar_max_import_current" name="solar_max_import_current" min="0" max="16" style="width:80px;" class="ui-corner-all ui-shadow-inset"/>&nbsp;A</div></div>
                                         <div class="mb-0"><div class="d-inline-flex align-items-center"><label style="width:100px;" for="solar_stop_time">Stop Time           </label><input type="number" onchange="SolStopTime()" id="solar_stop_time" name="solar_stop_time" min="0" style="width:80px;" class="ui-corner-all ui-shadow-inset"/>&nbsp;minutes</div></div>
-                                      </div>
-                                    </div>
-                                    <div class="row no-gutters align-items-center with_nom" style="display:none;">
-                                      <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">NOM:</div>
-                                      <div class="col">
-                                        <div class="mb-0"><div class="d-inline-flex align-items-center"><label style="width:100px;" for="nom_enabled">Nul op meter</label><input type="checkbox" onchange="NomToggle()" id="nom_enabled" name="nom_enabled"/>&nbsp;aan</div></div>
                                       </div>
                                     </div>
                                     <div class="row no-gutters align-items-center">
