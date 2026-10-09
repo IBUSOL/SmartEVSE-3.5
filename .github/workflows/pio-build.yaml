@@ -80,10 +80,12 @@ jobs:
           secret_file=$(mktemp)
           # Write the secret to the temporary file, because passing it as command line argument might reveal it for users using ps -a
           echo "$super_secret" > "$secret_file"
-          # Create signature file
-          openssl dgst -sign "$secret_file" -keyform PEM -sha256 -out firmware.sign -binary ./SmartEVSE-3/.pio/build/release/firmware.bin
-          # throw it all in one file
-          cat firmware.sign ./SmartEVSE-3/.pio/build/release/firmware.bin > ./SmartEVSE-3/.pio/build/release/firmware.signed.bin
+          # Create signature file (only when a signing key is configured; forks without SECRET_RSA_KEY build unsigned firmware)
+          if [ -n "$super_secret" ]; then
+            openssl dgst -sign "$secret_file" -keyform PEM -sha256 -out firmware.sign -binary ./SmartEVSE-3/.pio/build/release/firmware.bin
+            # throw it all in one file
+            cat firmware.sign ./SmartEVSE-3/.pio/build/release/firmware.bin > ./SmartEVSE-3/.pio/build/release/firmware.signed.bin
+          fi
 
           # save .bin files to directory because v4 upload-artifact@v4 can no longer add files to an existing artifact; so much for efficiency :-(
           mkdir ./SmartEVSE-3/distribution
@@ -100,14 +102,16 @@ jobs:
           secret_file=$(mktemp)
           # Write the secret to the temporary file, because passing it as command line argument might reveal it for users using ps -a
           echo "$super_secret" > "$secret_file"
-          # Create signature file
-          openssl dgst -sign "$secret_file" -keyform PEM -sha256 -out firmware.sign -binary ./SmartEVSE-3/.pio/build/release/firmware.bin
-          # throw it all in one file
-          cat firmware.sign ./SmartEVSE-3/.pio/build/release/firmware.bin > ./SmartEVSE-3/.pio/build/release/firmware.signed.bin
+          # Create signature file (only when a signing key is configured; forks without SECRET_RSA_KEY build unsigned firmware)
+          if [ -n "$super_secret" ]; then
+            openssl dgst -sign "$secret_file" -keyform PEM -sha256 -out firmware.sign -binary ./SmartEVSE-3/.pio/build/release/firmware.bin
+            # throw it all in one file
+            cat firmware.sign ./SmartEVSE-3/.pio/build/release/firmware.bin > ./SmartEVSE-3/.pio/build/release/firmware.signed.bin
+          fi
           # Remove the temporary file
           rm -f "$secret_file"
           mv ./SmartEVSE-3/.pio/build/release/firmware.bin ./SmartEVSE-3/distribution/firmware.debug.bin
-          mv ./SmartEVSE-3/.pio/build/release/firmware.signed.bin ./SmartEVSE-3/distribution/firmware.debug.signed.bin
+          if [ -f ./SmartEVSE-3/.pio/build/release/firmware.signed.bin ]; then mv ./SmartEVSE-3/.pio/build/release/firmware.signed.bin ./SmartEVSE-3/distribution/firmware.debug.signed.bin; fi
           # prevent the .bin files are gathered in .pio directory in the dists-zip file:
           cp -a ./SmartEVSE-3/HowToFlash.txt ./SmartEVSE-3/distribution
       
