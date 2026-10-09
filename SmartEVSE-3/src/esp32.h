@@ -102,6 +102,7 @@ extern portMUX_TYPE rtc_spinlock;   //TODO: Will be placed in the appropriate po
 extern struct tm timeinfo;
 
 
+extern uint8_t NomEnabled;                                                      // NOM switch (0:Off / 1:On) for MODE_NOM
 extern uint8_t Mode;                                                            // EVSE mode
 extern uint8_t LoadBl;                                                          // Load Balance Setting (Disable, Master or Node)
 extern uint8_t Grid;
@@ -168,7 +169,7 @@ const struct {
 
     // System configuration
     /* LCD,       Desc,                                                 Min, Max, Default */
-    {"MODE",    "Normal, Smart or Solar EVSE mode",                   0, 2, MODE},
+    {"MODE",    "Normal, Smart, Solar or NOM EVSE mode",              0, 3, MODE},
     {"CIRCUIT", "EVSE Circuit max Current",                           10, 160, MAX_CIRCUIT},
     {"GRID",    "Grid type to which the Sensorbox is connected",      0, 1, GRID},
     {"SB2 WIFI","Connect Sensorbox-2 to WiFi",                        0, 2, SB2_WIFI_MODE},

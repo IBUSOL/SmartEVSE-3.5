@@ -68,7 +68,8 @@ bool CustomButton = false;                                                  // T
 bool MqttButtonState = false;                                               // The status of the button send via MQTT
 uint16_t MaxCurrent = MAX_CURRENT;                                          // Max Charge current (A)
 uint16_t MinCurrent = MIN_CURRENT;                                          // Minimal current the EV is happy with (A)
-uint8_t Mode = MODE;                                                        // EVSE mode (0:Normal / 1:Smart / 2:Solar)
+uint8_t Mode = MODE;                                                        // EVSE mode (0:Normal / 1:Smart / 2:Solar / 3:NOM)
+uint8_t NomEnabled = 1;                                                     // NOM switch for MODE_NOM (0:Off = pure Solar behaviour / 1:On)
 uint32_t CurrentPWM = 0;                                                    // Current PWM duty cycle value (0 - 1024)
 bool CPDutyOverride = false;
 uint8_t Lock = LOCK;                                                        // Cable lock device (0:Disable / 1:Solenoid / 2:Motor)
@@ -284,7 +285,7 @@ void Button::HandleSwitch(void)
                 MqttButtonState = true;
                 break;
             case 4: // Smart-Solar Switch
-                if (Mode == MODE_SOLAR && AccessStatus == ON) {
+                if (IS_SOLAR_LIKE(Mode) && AccessStatus == ON) {
                     setMode(MODE_SMART);
                 }
                 MqttButtonState = true;
@@ -334,7 +335,7 @@ void Button::HandleSwitch(void)
                 if ((tmpMillis < TimeOfPress + 1500) && AccessStatus == ON) {                            // short press
                     if (Mode == MODE_SMART) {
                         setMode(MODE_SOLAR);
-                    } else if (Mode == MODE_SOLAR) {
+                    } else if (IS_SOLAR_LIKE(Mode)) {
                         setMode(MODE_SMART);
                     }
                     ErrorFlags &= ~(LESS_6A);                       // Clear All errors
@@ -422,7 +423,7 @@ void setOverrideCurrent(uint16_t Current) { //c
  */
 void CheckSwitchingPhases(void) {
     // we want to obey EnableC2 settings at all times, after switching modes and/or C2 settings
-    if (EnableC2 != AUTO || Mode == MODE_SOLAR) {
+    if (EnableC2 != AUTO || IS_SOLAR_LIKE(Mode)) {
         if (Force_Single_Phase_Charging()) {                                
             if (Nr_Of_Phases_Charging != 1) {                               // Currently charging with 3 phases
                 if (State != STATE_A) {                                 
@@ -462,7 +463,7 @@ void CheckSwitchingPhases(void) {
  * @param uint8_t Mode
  */
 void setMode(uint8_t NewMode) {
-    if (NewMode > MODE_SOLAR) { //this should never happen
+    if (NewMode > MODE_NOM) { //this should never happen
         _LOG_A("ERROR: setMode tries to set Mode to %u.\n", NewMode);
         return;
     }
@@ -473,8 +474,8 @@ void setMode(uint8_t NewMode) {
 
     // Take care of extra conditionals/checks for custom features
     setAccess(DelayedStartTime.epoch2 ? OFF : ON); //if DelayedStartTime not zero then we are Delayed Charging
-    if (NewMode == MODE_SOLAR) {
-        // Reset OverrideCurrent if mode is SOLAR
+    if (IS_SOLAR_LIKE(NewMode)) {
+        // Reset OverrideCurrent if mode is SOLAR or NOM
         setOverrideCurrent(0);
     }
 
@@ -483,7 +484,7 @@ void setMode(uint8_t NewMode) {
     // EXCEPT when EnableC2 == Solar Off, because we would expect C2 to be off when in Solar Mode and EnableC2 == Solar Off
     // and also the other way around, multiple phases might be wanted when changing from Solar to Normal or Smart
     if (EnableC2 == SOLAR_OFF) {
-        if ((Mode != MODE_SOLAR && NewMode == MODE_SOLAR) || (Mode == MODE_SOLAR && NewMode != MODE_SOLAR)) {
+        if (IS_SOLAR_LIKE(Mode) != IS_SOLAR_LIKE(NewMode)) {
 
             // Set State to C1 or B1 to make sure CP is disconnected for 5 seconds, before switching contactors on/off
             if (State == STATE_C) setState(STATE_C1); 
@@ -495,7 +496,7 @@ void setMode(uint8_t NewMode) {
 
     // similar to the above, when switching between solar charging at 1P and mode change, we need to switch back to 3P
     // TODO make sure that Smart 3P -> Solar 1P also disconnects
-    if ((EnableC2 == AUTO) && (Mode != NewMode) && (Mode == MODE_SOLAR) && (Nr_Of_Phases_Charging == 1) ) {
+    if ((EnableC2 == AUTO) && (IS_SOLAR_LIKE(Mode) && !IS_SOLAR_LIKE(NewMode)) && (Nr_Of_Phases_Charging == 1) ) {
     
         // Set State to C1 or B1 to make sure CP is disconnected for 5 seconds, before switching contactors on/off
         if (State == STATE_C) setState(STATE_C1);
@@ -557,7 +558,7 @@ uint8_t Force_Single_Phase_Charging() {
         case ALWAYS_OFF:
             return 1;   //1P charging
         case SOLAR_OFF:
-            return (Mode == MODE_SOLAR); //1P solar charging
+            return IS_SOLAR_LIKE(Mode); //1P solar charging
         case AUTO:
             return (Nr_Of_Phases_Charging == 1);
         case ALWAYS_ON:
@@ -803,8 +804,10 @@ char IsCurrentAvailable(void) {
     // Allow solar Charging if surplus current is above 'StartCurrent' (sum of all phases)
     // Charging will start after the timeout (chargedelay) period has ended
      // Only when StartCurrent configured or Node MinCurrent detected or Node inactive
-    if (Mode == MODE_SOLAR) {                                                   // no active EVSE yet?
-        if (ActiveEVSE == 0 && Isum >= ((signed int)StartCurrent *-10)) {
+    if (IS_SOLAR_LIKE(Mode)) {                                                  // no active EVSE yet?
+        // NOM switched on: as long as the meter shows (about) 0, we may start as if there is enough solar
+        signed int StartThreshold = NOM_ACTIVE ? NOM_MARGIN + 1 : ((signed int)StartCurrent *-10);
+        if (ActiveEVSE == 0 && Isum >= StartThreshold) {
             _LOG_D("No current available StartCurrent line %d. ActiveEVSE=%u, TotalCurrent=%d.%dA, StartCurrent=%uA, Isum=%d.%dA, ImportCurrent=%uA.\n", __LINE__, ActiveEVSE, TotalCurrent/10, abs(TotalCurrent%10), StartCurrent, Isum/10, abs(Isum%10), ImportCurrent);
             return 0;
         }
@@ -812,7 +815,7 @@ char IsCurrentAvailable(void) {
             _LOG_D("No current available StartCurrent line %d. ActiveEVSE=%u, TotalCurrent=%d.%dA, StartCurrent=%uA, Isum=%d.%dA, ImportCurrent=%uA.\n", __LINE__, ActiveEVSE, TotalCurrent/10, abs(TotalCurrent%10), StartCurrent, Isum/10, abs(Isum%10), ImportCurrent);
             return 0;
         }
-        else if (ActiveEVSE > 0 && Isum > ((signed int)ImportCurrent * 10) + TotalCurrent - (ActiveEVSE * MinCurrent * 10)) {
+        else if (ActiveEVSE > 0 && Isum > ((signed int)ImportCurrent * 10) + (NOM_ACTIVE ? NOM_MARGIN : 0) + TotalCurrent - (ActiveEVSE * MinCurrent * 10)) {
             _LOG_D("No current available StartCurrent line %d. ActiveEVSE=%u, TotalCurrent=%d.%dA, StartCurrent=%uA, Isum=%d.%dA, ImportCurrent=%uA.\n", __LINE__, ActiveEVSE, TotalCurrent/10, abs(TotalCurrent%10), StartCurrent, Isum/10, abs(Isum%10), ImportCurrent);
             return 0;
         }
@@ -924,7 +927,7 @@ void CalcBalancedCurrent(char mod) {
         }                    
     } //end MODE_NORMAL
     else { // start MODE_SOLAR || MODE_SMART
-        if (Mode == MODE_SOLAR && State == STATE_B) {
+        if (IS_SOLAR_LIKE(Mode) && State == STATE_B) {
             // Prepare for switching to state C
             _LOG_D("waiting for Solar (B) Isum=%d dA, phases=%d\n", Isum, Nr_Of_Phases_Charging);
             if (EnableC2 == AUTO) {
@@ -981,15 +984,18 @@ void CalcBalancedCurrent(char mod) {
         }
         _LOG_V("Checkpoint 2 Isetbalanced=%d.%d A, Idifference=%d.%d, mod=%u.\n", IsetBalanced/10, abs(IsetBalanced%10), Idifference/10, abs(Idifference%10), mod);
 
-        if (Mode == MODE_SOLAR)                                                 // Solar version
+        if (IS_SOLAR_LIKE(Mode))                                                // Solar version (also used by NOM)
         {
             IsumImport = Isum - (10 * ImportCurrent);                           // Allow Import of power from the grid when solar charging
+            if (NOM_ACTIVE) IsumImport -= NOM_MARGIN;                           // NOM: a meter at (about) 0 counts as available power
             // when there is NO charging, do not change the setpoint (IsetBalanced); except when we are in Master/Slave configuration
             if (ActiveEVSE > 0 && Idifference > 0) {                            // so we had some room for power as far as MaxCircuit and MaxMains are concerned
                 if (phasesLastUpdateFlag) {                                     // only increase or decrease current if measurements are updated.
                     if (IsumImport < 0) {
                         // negative, we have surplus (solar) power available
-                        if (IsumImport < -10 && Idifference > 10)
+                        if (NOM_ACTIVE && Isum >= -10)
+                            IsetBalanced = IsetBalanced + NOM_RAMP;                 // NOM: meter is at 0 (home battery covers us), increase slowly
+                        else if (IsumImport < -10 && Idifference > 10)
                             IsetBalanced = IsetBalanced + 5;                        // more then 1A available, increase Balanced charge current with 0.5A
                         else
                             IsetBalanced = IsetBalanced + 1;                        // less then 1A available, increase with 0.1A
@@ -1050,7 +1056,7 @@ void CalcBalancedCurrent(char mod) {
             // ############### shortage of power  #################
 
             IsetBalanced = ActiveEVSE * MinCurrent * 10;                        // retain old software behaviour: set minimal "MinCurrent" charge per active EVSE
-            if (Mode == MODE_SOLAR) {
+            if (IS_SOLAR_LIKE(Mode)) {
                 // ----------- Check to see if we have to continue charging on solar power alone ----------
                                               // Importing too much?
                 if (ActiveEVSE && IsumImport > 0 &&
@@ -1118,7 +1124,7 @@ void CalcBalancedCurrent(char mod) {
 
             // Solar mode with C2=AUTO and enough power for switching from 1P to 3P solar charge?
             // This is only relevant for the Master controller when charging, Nodes are not yet supported
-            if (Mode == MODE_SOLAR && Nr_Of_Phases_Charging == 1 && EnableC2 == AUTO && IsetBalanced + 8 >= MaxCurrent * 10 && State == STATE_C) {
+            if (IS_SOLAR_LIKE(Mode) && Nr_Of_Phases_Charging == 1 && EnableC2 == AUTO && IsetBalanced + 8 >= MaxCurrent * 10 && State == STATE_C) {
                     // are we at max regulation at 1P (Iset hovers at 15.2-16.0A on 16A MaxCurrent)(warning: Iset can also be at max when EV limits current)
                     // and is there enough spare that we can go to 3P charging?
                     // Can it take the step from 1x16A to 3x7A (in regular config)?
@@ -1171,7 +1177,7 @@ void CalcBalancedCurrent(char mod) {
             if ((BalancedState[n] == STATE_C) && (!CurrentSet[n])) {            
 
                 // Check for EVSE's that are starting with Solar charging
-                if ((Mode == MODE_SOLAR) && (Node[n].IntTimer < SOLARSTARTTIME)) {
+                if (IS_SOLAR_LIKE(Mode) && (Node[n].IntTimer < SOLARSTARTTIME)) {
                     Balanced[n] = MinCurrent * 10;                              // Set to MinCurrent
                     _LOG_V("[S]Node %u = %u.%u A\n", n, Balanced[n]/10, Balanced[n]%10);
                     CurrentSet[n] = 1;                                          // mark this EVSE as set.
@@ -1411,7 +1417,7 @@ void Timer1S_singlerun(void) {
 
     // While ChargeDelay is counting down (waiting to start charging), keep re-checking solar availability.
     // If solar power has disappeared during the countdown, re-set the LESS_6A error to restart the wait cycle.
-    if (ChargeDelay && !(ErrorFlags & LESS_6A) && Mode == MODE_SOLAR && (LoadBl < 2) && !IsCurrentAvailable()) {
+    if (ChargeDelay && !(ErrorFlags & LESS_6A) && IS_SOLAR_LIKE(Mode) && (LoadBl < 2) && !IsCurrentAvailable()) {
         setErrorFlags(LESS_6A);
         _LOG_I("Solar power no longer available during ChargeDelay, restarting wait.\n");
     }
@@ -1480,7 +1486,7 @@ void Timer1S_singlerun(void) {
 
     if (ErrorFlags & LESS_6A) {
         if (ChargeDelay == 0) {
-            if (Mode == MODE_SOLAR) { _LOG_I("Waiting for Solar power...\n"); }
+            if (IS_SOLAR_LIKE(Mode)) { _LOG_I("Waiting for Solar power...\n"); }
             else { _LOG_I("Not enough current available!\n"); }
         }
         setStatePowerUnavailable();
@@ -1801,7 +1807,7 @@ uint8_t processAllNodeStates(uint8_t NodeNr) {
         }
     } else {
         // Re-set LESS_6A on Node if solar power disappeared during ChargeDelay countdown.
-        if (Mode == MODE_SOLAR && BalancedState[NodeNr] == STATE_B1 && !(BalancedError[NodeNr] & LESS_6A)) {
+        if (IS_SOLAR_LIKE(Mode) && BalancedState[NodeNr] == STATE_B1 && !(BalancedError[NodeNr] & LESS_6A)) {
             BalancedError[NodeNr] |= LESS_6A;
             write = 1;
         }
@@ -2214,7 +2220,7 @@ static unsigned int LedPwm = 0;                                                /
                 RedPwm = LedPwm * ColorCustom[0] / 255;
                 GreenPwm = LedPwm * ColorCustom[1] / 255;
                 BluePwm = LedPwm * ColorCustom[2] / 255;
-            } else if (Mode == MODE_SOLAR) {                                // Orange for Solar, unless configured otherwise
+            } else if (IS_SOLAR_LIKE(Mode)) {                               // Orange for Solar/NOM, unless configured otherwise
                 RedPwm = LedPwm * ColorSolar[0] / 255;
                 GreenPwm = LedPwm * ColorSolar[1] / 255;
                 BluePwm = LedPwm * ColorSolar[2] / 255;
@@ -2293,7 +2299,7 @@ static unsigned int LedPwm = 0;                                                /
             LedCount = 128;                                                 // When switching to STATE C, start at full brightness
 
         } else if (State == STATE_C) {                                      
-            if (Mode == MODE_SOLAR) LedCount ++;                            // Slower fading (Solar mode)
+            if (IS_SOLAR_LIKE(Mode)) LedCount ++;                           // Slower fading (Solar mode)
             else LedCount += 2;                                             // Faster fading (Smart mode)
             LedPwm = ease8InOutQuad(triwave8(LedCount));                    // pre calculate new LedPwm value
         }
@@ -2302,7 +2308,7 @@ static unsigned int LedPwm = 0;                                                /
             RedPwm = LedPwm * ColorCustom[0] / 255;
             GreenPwm = LedPwm * ColorCustom[1] / 255;
             BluePwm = LedPwm * ColorCustom[2] / 255;
-        } else if (Mode == MODE_SOLAR) {                                // Orange for Solar, unless configured otherwise
+        } else if (IS_SOLAR_LIKE(Mode)) {                               // Orange for Solar/NOM, unless configured otherwise
             RedPwm = LedPwm * ColorSolar[0] / 255;
             GreenPwm = LedPwm * ColorSolar[1] / 255;
             BluePwm = LedPwm * ColorSolar[2] / 255;
@@ -2853,7 +2859,7 @@ int16_t getBatteryCurrent(void) {
         homeBatteryLastUpdate = 0;                      // last update was more then 60s ago, set to 0
         homeBatteryCurrent = 0;
         return 0;
-    } else if (Mode == MODE_SOLAR) {                    // Use BatteryCurrent only in Solar Mode
+    } else if (IS_SOLAR_LIKE(Mode)) {                   // Use BatteryCurrent only in Solar/NOM Mode
         return homeBatteryCurrent;
     } else {
         return 0;                                       // don't touch homeBatteryCurrent, just return 0

@@ -781,7 +781,7 @@ void GLCD(void) {
             }
         }
     }                                                                           // MODE SMART or SOLAR
-    else if ((Mode == MODE_SMART) || (Mode == MODE_SOLAR)) {
+    else if ((Mode == MODE_SMART) || IS_SOLAR_LIKE(Mode)) {
 
         memcpy (GLCDbuf, LCD_Flow, 512);                                        // copy Flow Menu to LCD buffer
 
@@ -863,7 +863,7 @@ void GLCD(void) {
             for (x = 73; x < 96; x++) GLCDbuf[3u * 128u + x] = 0;
         }
 
-        if (LCDToggle && Mode == MODE_SOLAR) {                                  // Show Sum of currents when solar charging.
+        if (LCDToggle && IS_SOLAR_LIKE(Mode)) {                                  // Show Sum of currents when solar charging.
             GLCDx = 41;
             GLCDy = 1;
             GLCD_write_buf(0x0B, 0);                                            // Sum symbol
@@ -918,6 +918,7 @@ void GLCD(void) {
                     LCDText = 0;
                     if (Mode != MODE_NORMAL) {
                         if (Mode == MODE_SOLAR) sprintf(Str, "SOLAR");
+                            else if (Mode == MODE_NOM) sprintf(Str, NomEnabled ? "NOM  " : "NOM- ");
                             else sprintf(Str, "SMART");
                             sprintf(Str+5," %uP", Nr_Of_Phases_Charging);
                         GLCD_print_buf2(5, Str);
@@ -1032,6 +1033,7 @@ const char * getMenuItemOption(uint8_t nav) {
     const static char StrSmart[]   = "Smart";
     const static char StrNormal[]  = "Normal";
     const static char StrSolar[]   = "Solar";
+    const static char StrNom[]     = "NOM";
     const static char StrSolenoid[] = "Solenoid";
     const static char StrMotor[]   = "Motor";
     const static char StrDisabled[] = "Disabled";
@@ -1058,6 +1060,7 @@ const char * getMenuItemOption(uint8_t nav) {
         case MENU_MODE:
             if (Mode == MODE_SMART) return StrSmart;
             else if (Mode == MODE_SOLAR) return StrSolar;
+            else if (Mode == MODE_NOM) return StrNom;
             else return StrNormal;
         case MENU_START:
             sprintf(Str, "-%2u A", value);
@@ -1241,7 +1244,7 @@ uint8_t getMenuItems (void) {
         }
     }
     MenuItems[m++] = MENU_MAX;                                                  // Max Charge current (A)
-    if (Mode == MODE_SOLAR && LoadBl < 2) {                                     // ? Solar mode and Load Balancing Disabled/Master?
+    if (IS_SOLAR_LIKE(Mode) && LoadBl < 2) {                                     // ? Solar mode and Load Balancing Disabled/Master?
         MenuItems[m++] = MENU_START;                                            // - Start Surplus Current (A)
         MenuItems[m++] = MENU_STOP;                                             // - Stop time (min)
         MenuItems[m++] = MENU_IMPORT;                                           // - Import Current from Grid (A)

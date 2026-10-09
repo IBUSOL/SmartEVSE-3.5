@@ -93,7 +93,7 @@ extern uint8_t pilot;
 extern const char StrStateName[15][13];
 const char StrStateNameWeb[15][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging", "Modem Setup", "Modem Request", "Modem Done", "Modem Denied"};
 const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "EV Meter Comm Error", "RCM Tripped", "RCM Test", "Test IO", "Flash Error"};
-const char StrMode[3][8] = {"Normal", "Smart", "Solar"};
+const char StrMode[4][8] = {"Normal", "Smart", "Solar", "NOM"};
 const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stored", "Card Deleted", "Card already stored", "Card not in storage", "Card Storage full", "Invalid" };
 extern const char StrRFIDReader[7][10] = {"Disabled", "EnableAll", "EnableOne", "Learn", "Delete", "DeleteAll", "Rmt/OCPP"};
 bool BuzzerPresent = false;
@@ -489,9 +489,16 @@ void mqtt_receive_callback(const String topic, const String payload) {
             setMode(MODE_SOLAR);
         } else if (payload == "Smart") {
             setMode(MODE_SMART);
+        } else if (payload == "NOM") {
+            setOverrideCurrent(0);
+            setMode(MODE_NOM);
         } else if (payload == "Pause") {
             setAccess(PAUSE);
         }
+    } else if (topic == MQTTprefix + "/Set/NOM") {
+        NomEnabled = (payload == "On") ? 1 : 0;
+        shadowPrefs.markUChar("NomEnabled", &NomEnabled);
+        lastMqttUpdate = 10;
     } else if (topic == MQTTprefix + "/Set/CustomButton") {
         if (payload == "On") {
             CustomButton = true;
@@ -868,6 +875,10 @@ void SetupMQTTClient() {
         ", \"state_topic\":\"%s/CustomButton\", \"command_topic\":\"%s/Set/CustomButton\", \"options\":[\"On\", \"Off\"]", p, p);
     MQTTclient.announce("Custom Button", "select", opt);
 
+    snprintf(opt, sizeof(opt),
+        ", \"state_topic\":\"%s/NOM\", \"command_topic\":\"%s/Set/NOM\", \"options\":[\"On\", \"Off\"]", p, p);
+    MQTTclient.announce("NOM", "select", opt);
+
     MQTTclient.announce("SolarStopTimer",    "sensor", ", \"device_class\":\"duration\", \"unit_of_measurement\":\"s\"");
     MQTTclient.announce("Max Sum Mains Time","sensor", ", \"device_class\":\"duration\", \"unit_of_measurement\":\"min\"");
 
@@ -895,7 +906,7 @@ void SetupMQTTClient() {
     // select entities, overriding automatic state_topic:
     snprintf(opt, sizeof(opt),
         ", \"state_topic\":\"%s/Mode\", \"command_topic\":\"%s/Set/Mode\""
-        ", \"options\":[\"Off\", \"Normal\", \"Smart\", \"Solar\", \"Pause\"]", p, p);
+        ", \"options\":[\"Off\", \"Normal\", \"Smart\", \"Solar\", \"NOM\", \"Pause\"]", p, p);
     MQTTclient.announce("Mode", "select", opt);
 
     snprintf(opt, sizeof(opt),
@@ -966,11 +977,12 @@ void mqttPublishData() {
             mqPubI("/CircuitTotalEnergy", CircuitMeter.Energy, false, 0);
         }
         mqPubI("/ESPTemp", TempEVSE, false, 0);
-        mqPubS("/Mode", AccessStatus == OFF ? "Off" : AccessStatus == PAUSE ? "Pause" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
+        mqPubS("/Mode", AccessStatus == OFF ? "Off" : AccessStatus == PAUSE ? "Pause" : Mode > MODE_NOM ? "N/A" : StrMode[Mode], true, 0);
         mqPubI("/MaxCurrent", MaxCurrent * 10, true, 0);
         mqPubI("/MaxSumMains", MaxSumMains, true, 0);
         mqPubI("/MaxSumMainsTime", MaxSumMainsTime, true, 0);
         mqPubS("/CustomButton", CustomButton ? "On" : "Off", false, 0);
+        mqPubS("/NOM", NomEnabled ? "On" : "Off", true, 0);
         mqPubI("/ChargeCurrent", Balanced[0], true, 0);
         mqPubI("/ChargeCurrentOverride", OverrideCurrent, true, 0);
         mqPubI("/NrOfPhases", Nr_Of_Phases_Charging, true, 0);
@@ -1056,7 +1068,7 @@ void mqttSmartEVSEPublishData() {
     MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/Access", AccessStatus == OFF ? "Deny" : AccessStatus == ON ? "Allow" : AccessStatus == PAUSE ? "Pause" : "N/A", true, 0);
     MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/ChargeCurrent", String(Balanced[0]), true, 0);
     MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/ChargeCurrentOverride", String(OverrideCurrent), true, 0);
-    MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/Mode", AccessStatus == OFF ? "Off" : AccessStatus == PAUSE ? "Pause" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
+    MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/Mode", AccessStatus == OFF ? "Off" : AccessStatus == PAUSE ? "Pause" : Mode > MODE_NOM ? "N/A" : StrMode[Mode], true, 0);
     MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/NrOfPhases", String(Nr_Of_Phases_Charging), true, 0);
     MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/State", getStateNameWeb(State), true, 0);
     MQTTclientSmartEVSE.publish(MQTTSmartEVSEprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
@@ -1215,6 +1227,7 @@ void read_settings() {
         Config = preferences.getUChar("Config", CONFIG); 
         Lock = preferences.getUChar("Lock", LOCK); 
         Mode = preferences.getUChar("Mode", MODE); 
+        NomEnabled = preferences.getUChar("NomEnabled", 1);
         AccessStatus = (AccessStatus_t) preferences.getUChar("Access", ON);
         if (preferences.isKey("CardOffset")) {
             CardOffset = preferences.getUChar("CardOffset", CARD_OFFSET);
@@ -1312,6 +1325,7 @@ void write_settings(void) {
     PREFS_PUT_UCHAR_IF_CHANGED("Config", Config);
     PREFS_PUT_UCHAR_IF_CHANGED("Lock", Lock);
     PREFS_PUT_UCHAR_IF_CHANGED("Mode", Mode);
+    PREFS_PUT_UCHAR_IF_CHANGED("NomEnabled", NomEnabled);
     PREFS_PUT_UCHAR_IF_CHANGED("Access", AccessStatus);
     PREFS_PUT_USHORT_IF_CHANGED("CardOffs16", CardOffset);
     PREFS_PUT_ULONG_IF_CHANGED("DelayedStartTim", DelayedStartTime.epoch2);
@@ -1438,7 +1452,7 @@ void RecomputeSoC(void) {
                 if (EVMeter.PowerMeasured > 0) {
                     // Use real-time PowerMeasured data if available
                     TimeToGo = (3600 * EnergyRemaining) / EVMeter.PowerMeasured;
-                } else if (Mode != MODE_SOLAR && MaxCapacity != 0) { //prevent divide by zero
+                } else if (!IS_SOLAR_LIKE(Mode) && MaxCapacity != 0) { //prevent divide by zero
                     // Else, fall back on the theoretical maximum of the cable + nr of phases
                     TimeToGo = (3600 * EnergyRemaining) / (MaxCapacity * (Nr_Of_Phases_Charging * 230));
                 }
@@ -1530,6 +1544,7 @@ bool handle_URI(struct mg_connection *c, struct mg_http_message *hm,  webServerR
                 case MODE_NORMAL: mode = "NORMAL"; modeId=1; break;
                 case MODE_SOLAR: mode = "SOLAR"; modeId=2; break;
                 case MODE_SMART: mode = "SMART"; modeId=3; break;
+                case MODE_NOM: mode = "NOM"; modeId=5; break;
             }
         }
         if (mode == "N/A") { //this should never happen, but it does
@@ -1601,6 +1616,7 @@ bool handle_URI(struct mg_connection *c, struct mg_http_message *hm,  webServerR
         doc["evse"]["connected"] = evConnected;
         doc["evse"]["access"] = AccessStatus;
         doc["evse"]["mode"] = Mode;
+        doc["evse"]["nom"] = NomEnabled;
         doc["evse"]["loadbl"] = LoadBl;
         doc["evse"]["pwm"] = CurrentPWM;
         doc["evse"]["custombutton"] = CustomButton;
@@ -1910,10 +1926,19 @@ bool handle_URI(struct mg_connection *c, struct mg_http_message *hm,  webServerR
                 case 4: // PAUSE
                     setAccess(PAUSE);
                     break;
+                case 5: // NOM
+                    setMode(MODE_NOM);
+                    break;
                 default:
                     mode = "Value not allowed!";
             }
             doc["mode"] = mode;
+        }
+
+        if(request->hasParam("nom")) {
+            NomEnabled = request->getParam("nom")->value().toInt() > 0 ? 1 : 0;
+            shadowPrefs.markUChar("NomEnabled", &NomEnabled);
+            doc["nom"] = NomEnabled;
         }
 
         if(request->hasParam("enable_C2")) {
