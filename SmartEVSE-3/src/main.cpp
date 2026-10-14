@@ -1011,7 +1011,7 @@ void CalcBalancedCurrent(char mod) {
                             if (NomImportSince == 0) NomImportSince = time(NULL);
                             if (time(NULL) - NomImportSince >= NOM_DECREASE_DELAY) {
                                 if (IsumImport > 60)
-                                    IsetBalanced = IsetBalanced - (IsumImport / 4); // large import (>6A over margin): decrease faster
+                                    IsetBalanced = IsetBalanced - min(IsumImport / 4, NOM_STEP_DOWN_MAX); // large import (>6A over margin): decrease faster, but at most 1A per update
                                 else
                                     IsetBalanced = IsetBalanced - NOM_STEP_DOWN;    // decrease with 0.5A per update
                             }
