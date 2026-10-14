@@ -139,6 +139,7 @@
 #define NOM_RAMP 2                                                              // NOM: increase charge current with 0.2A per meter update when meter is at 0
 #define NOM_DECREASE_DELAY 10                                                   // NOM: import must last this many seconds before we lower the current (home battery reaction time)
 #define NOM_STEP_DOWN 5                                                         // NOM: lower charge current with 0.5A per meter update while importing
+#define NOM_STEP_DOWN_MAX 10                                                    // NOM: never lower the charge current by more than 1.0A per meter update
 #define NOM_AVG_TIME 30                                                         // NOM: Isum is averaged over ~30 seconds, so home battery overshoots cancel out
 
 #define MODBUS_BAUDRATE 9600
