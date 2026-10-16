@@ -2917,7 +2917,7 @@ void CalcIsum(void) {
     // NOM: keep a time based moving average of Isum, so the regulation does not chase every
     // overshoot of the home battery. MaxMains/MaxCircuit protection does NOT use this average.
     uint32_t now = millis();
-    if (Mode != MODE_NOM || NomAvgLastMillis == 0) {
+    if (!IS_SOLAR_LIKE(Mode) || NomAvgLastMillis == 0) {
         NomIsumAvg = Isum;                                                      // (re)start the average at the current value
     } else {
         float dt = (now - NomAvgLastMillis) / 1000.0f;
